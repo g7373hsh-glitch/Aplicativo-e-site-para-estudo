@@ -97,6 +97,8 @@ function App() {
       creating=false;
       if(!alive||error||!data)return;
       studySessionRef.current={id:data.id,seconds:0,startedAt};
+      const today=new Date(startedAt).toLocaleDateString("en-CA");
+      setStudyDates(prev=>prev.includes(today)?prev:[...prev,today]);
     };
     const markActivity=()=>{lastActivity=Date.now();};
     const onVisibility=()=>{if(document.visibilityState==="hidden")void closeSession();else markActivity();};
@@ -255,6 +257,9 @@ function App() {
     const {error:updateError}=await supabase.from("quiz_attempts").update({finished_at:new Date().toISOString(),score,total_questions:quizQuestions.length,correct_count:correct}).eq("id",attemptId);
     if(updateError){notify("Respostas salvas, mas houve falha ao registrar a nota.");return;}
     setQuizResult({score,correct,total:quizQuestions.length});
+    const {data:latestAttempts}=await supabase.from("quiz_attempts").select("score").not("finished_at","is",null);
+    const latestScores=(latestAttempts??[]).map(row=>Number(row.score)).filter(Number.isFinite);
+    setAverageScore(latestScores.length?Math.round(latestScores.reduce((a,b)=>a+b,0)/latestScores.length):null);
   };
   const openDeck=async(deck:FlashDeck)=>{
     if(!supabase)return;
