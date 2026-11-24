@@ -4,6 +4,7 @@ import { supabase, isSupabaseConfigured } from "./lib/supabase";
 import { askStudyAI } from "./lib/ai";
 
 type Task = { id: string; title: string; subject: string; time: string; done: boolean };
+type Material = { id:string; file_name:string; storage_path:string; size_bytes:number|null; processing_status:string; created_at:string };
 const initialTasks: Task[] = [
   { id: "demo-1", title: "Revisar funções do 2º grau", subject: "Matemática", time: "09:30", done: false },
   { id: "demo-2", title: "Ler capítulo 04 — Citologia", subject: "Biologia", time: "11:00", done: false },
@@ -29,6 +30,7 @@ function App() {
   const [aiLoading, setAiLoading] = useState(false);
   const [conversationId, setConversationId] = useState<string|null>(null);
   const [fileName, setFileName] = useState("");
+  const [materials, setMaterials] = useState<Material[]>([]);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [userEmail, setUserEmail] = useState<string|null>(null);
   const [authEmail, setAuthEmail] = useState("");
@@ -38,7 +40,7 @@ function App() {
   const [weekOffset, setWeekOffset] = useState(0);
   useEffect(() => { if (!userEmail) localStorage.setItem("study-ai-tasks", JSON.stringify(tasks)); }, [tasks,userEmail]);
   useEffect(() => { if (!supabase) return; supabase.auth.getSession().then(({data}) => setUserEmail(data.session?.user.email ?? null)); const {data}=supabase.auth.onAuthStateChange((_e,s)=>{ setUserEmail(s?.user.email??null); setConversationId(null); setAnswer(""); if(!s?.user){setTasks(initialTasks);setFileName("");} }); return ()=>data.subscription.unsubscribe(); }, []);
-  useEffect(() => { let alive=true; const load=async()=>{ if(!supabase||!userEmail) return; const {data,error}=await supabase.from("study_tasks").select("id,title,completed_at,due_at,subjects(name)").order("created_at",{ascending:false}); if(!alive)return; if(error){notify("Não foi possível carregar suas tarefas.");return;} setTasks((data??[]).map((t:any)=>({id:t.id,title:t.title,subject:t.subjects?.name??"Geral",time:t.due_at?new Date(t.due_at).toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"}):"Sem horário",done:Boolean(t.completed_at)}))); }; void load(); return()=>{alive=false;}; }, [userEmail]);
+  useEffect(() => { let alive=true; const load=async()=>{ if(!supabase||!userEmail) return; const {data,error}=await supabase.from("study_tasks").select("id,title,completed_at,due_at,subjects(name)").order("created_at",{ascending:false}); if(!alive)return; if(error){notify("Não foi possível carregar suas tarefas.");return;} setTasks((data??[]).map((t:any)=>({id:t.id,title:t.title,subject:t.subjects?.name??"Geral",time:t.due_at?new Date(t.due_at).toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"}):"Sem horário",done:Boolean(t.completed_at)}))); const {data:files,error:fileError}=await supabase.from("study_materials").select("id,file_name,storage_path,size_bytes,processing_status,created_at").order("created_at",{ascending:false}); if(alive&&!fileError)setMaterials(files??[]); }; void load(); return()=>{alive=false;}; }, [userEmail]);
   const completed = tasks.filter(t=>t.done).length;
   const progress = tasks.length ? Math.round(completed/tasks.length*100) : 0;
   const notify = (message:string) => { setToast(message); window.setTimeout(()=>setToast(""),2800); };
@@ -92,10 +94,26 @@ function App() {
     if(uploadError){notify("Falha no envio: "+uploadError.message);return;}
     const {error:recordError}=await supabase.from("study_materials").insert({user_id:user.id,file_name:file.name,storage_path:path,mime_type:file.type,size_bytes:file.size,processing_status:"pending"});
     if(recordError){await supabase.storage.from("study-materials").remove([path]);notify("Não foi possível registrar o material.");return;}
+    const {data:created}=await supabase.from("study_materials").select("id,file_name,storage_path,size_bytes,processing_status,created_at").eq("storage_path",path).single();
+    if(created)setMaterials(prev=>[created,...prev]);
     setFileName(file.name); notify("Material enviado com segurança para sua biblioteca."); setModal(null);
   };
   const signIn = async () => { if (!supabase) { setAuthMessage("Configure VITE_SUPABASE_URL e VITE_SUPABASE_ANON_KEY para ativar contas reais."); return; } const {error}=await supabase.auth.signInWithPassword({email:authEmail,password:authPassword}); setAuthMessage(error?.message ?? "Login realizado."); };
   const signUp = async () => { if (!supabase) { setAuthMessage("Configure o Supabase para criar contas individuais com segurança."); return; } const {error}=await supabase.auth.signUp({email:authEmail,password:authPassword}); setAuthMessage(error?.message ?? "Verifique seu e-mail para confirmar a conta."); };
+  const openMaterial = async (path:string) => {
+    if(!supabase)return;
+    const {data,error}=await supabase.storage.from("study-materials").createSignedUrl(path,60);
+    if(error||!data){notify("Não foi possível abrir o arquivo.");return;}
+    window.open(data.signedUrl,"_blank","noopener,noreferrer");
+  };
+  const deleteMaterial = async (material:Material) => {
+    if(!supabase)return;
+    const {error:storageError}=await supabase.storage.from("study-materials").remove([material.storage_path]);
+    if(storageError){notify("Não foi possível excluir o arquivo.");return;}
+    const {error}=await supabase.from("study_materials").delete().eq("id",material.id);
+    if(error){notify("Arquivo removido do armazenamento, mas o registro não foi excluído.");return;}
+    setMaterials(prev=>prev.filter(m=>m.id!==material.id)); notify("Material excluído.");
+  };
   const title = active === "Visão geral" ? "Visão geral" : active;
   const week = useMemo(()=>["SEG","TER","QUA","QUI","SEX","SÁB","DOM"].map((d,i)=>({d,n:((17+i+weekOffset*7-1)%31)+1})),[weekOffset]);
   return <div className="app-shell">
@@ -127,7 +145,7 @@ function App() {
           <div className="ai-card"><div className="ai-glow"/><div className="ai-card-top"><div className="ai-logo"><Sparkles size={19}/></div><span className="ai-tag">STUDY AI</span></div><div className="ai-card-copy"><span>SEU ASSISTENTE PESSOAL</span><h2>Aprender pode ser mais inteligente.</h2><p>Tire dúvidas, transforme materiais em resumos e pratique com questões personalizadas.</p></div><button onClick={()=>{setActive("Meu tutor IA");setModal("assistant");}}>Conversar com o tutor <ArrowRight size={15}/></button><div className="ai-orbit orbit-one"/><div className="ai-orbit orbit-two"/></div></section>
         </> : <section className="section-placeholder panel">
           {active==="Meu tutor IA"?<><div className="placeholder-icon"><BrainCircuit size={25}/></div><h2>Seu tutor, sempre por perto.</h2><p>Faça perguntas, peça explicações e aprofunde seus estudos. A conexão com o serviço de IA será ativada na etapa de backend.</p><div className="chat-demo"><div className="chat-bubble bot"><Sparkles size={15}/> Olá! Sou seu espaço de tutoria. Como posso ajudar nos seus estudos?</div>{answer&&<div className="chat-bubble bot">{answer}</div>}{aiLoading&&<div className="chat-bubble bot"><Sparkles size={15}/> Preparando sua explicação...</div>}<div className="chat-compose"><input value={question} onChange={e=>setQuestion(e.target.value)} onKeyDown={e=>e.key==="Enter"&&askTutor()} placeholder="Digite sua dúvida..." disabled={aiLoading}/><button onClick={askTutor} disabled={aiLoading}><ArrowRight size={17}/></button></div></div></>:
-          active==="Materiais"?<><div className="placeholder-icon"><FolderOpen size={25}/></div><h2>Seu conhecimento, em um só lugar.</h2><p>Organize PDFs, documentos e anotações. O armazenamento privado e a análise inteligente dependem da configuração do backend.</p><button className="primary-btn" onClick={()=>setModal("upload")}><Upload size={16}/> Adicionar material</button>{fileName&&<div className="uploaded-file"><FileText size={18}/>{fileName}<span>Selecionado nesta sessão</span></div>}</>:
+          active==="Materiais"?<><div className="placeholder-icon"><FolderOpen size={25}/></div><h2>Seu conhecimento, em um só lugar.</h2><p>Organize PDFs, documentos e anotações. O armazenamento privado e a análise inteligente dependem da configuração do backend.</p><button className="primary-btn" onClick={()=>setModal("upload")}><Upload size={16}/> Adicionar material</button>{materials.length>0&&<div className="material-library">{materials.map(m=><div className="uploaded-file" key={m.id}><FileText size={18}/><div className="material-file-meta"><strong>{m.file_name}</strong><span>{m.size_bytes?`${(m.size_bytes/1024/1024).toFixed(1)} MB`:"Arquivo"} · {m.processing_status==="ready"?"Processado":"Aguardando análise"}</span></div><button className="secondary-btn" onClick={()=>openMaterial(m.storage_path)}>Abrir</button><button className="icon-btn" onClick={()=>deleteMaterial(m)} title="Excluir material"><X size={15}/></button></div>)}</div>}{materials.length===0&&fileName&&<div className="uploaded-file"><FileText size={18}/>{fileName}<span>Enviado nesta sessão</span></div>}</>:
           active==="Simulados"?<><div className="placeholder-icon"><Target size={25}/></div><h2>Pratique para chegar mais longe.</h2><p>Os simulados personalizados serão gerados com base nos seus materiais quando a integração de IA estiver conectada.</p><button className="primary-btn" onClick={()=>notify("O gerador de simulados será conectado ao motor de IA.")}>Preparar simulado <ArrowRight size={16}/></button></>:
           active==="Flashcards"?<><div className="placeholder-icon"><Zap size={25}/></div><h2>Memorize no seu ritmo.</h2><p>Flashcards com revisão espaçada para transformar conteúdo em conhecimento duradouro.</p><div className="flashcard" onClick={e=>e.currentTarget.classList.toggle("flipped")}><span>TOQUE PARA REVELAR</span><strong>O que é fotossíntese?</strong><small>Resposta no verso ↗</small></div></>:
           <><div className="placeholder-icon"><CalendarDays size={25}/></div><h2>Planeje sua evolução.</h2><p>Crie metas, organize matérias e acompanhe seu cronograma de estudos.</p><button className="primary-btn" onClick={()=>setModal("task")}><Plus size={16}/> Adicionar tarefa</button><div className="plan-summary"><strong>Seu plano atual</strong><span>{tasks.length} tarefas · {completed} concluídas</span><div className="progress-track"><i style={{width:progress+"%"}}/></div></div></>}
