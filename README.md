@@ -6,7 +6,7 @@ Plataforma de estudos com IA, desenvolvida com React, TypeScript, Vite e Supabas
 - Interface responsiva para desktop, tablet e celular.
 - Autenticação por e-mail e senha via Supabase Auth.
 - Tarefas de estudo persistidas por usuário.
-- Upload de materiais para bucket privado do Supabase Storage.
+- Upload de materiais para bucket privado do Supabase Storage (limite de 50 MB).\n- Extração de texto e indexação semântica de PDF com texto, DOCX, PPTX, TXT e CSV.\n- Busca vetorial dos trechos relevantes da biblioteca privada durante as respostas do tutor, com referência ao arquivo e página quando disponível.
 - Tutor IA via Supabase Edge Function e OpenAI Responses API.
 - Histórico de conversas e mensagens com isolamento por usuário.
 - Banco de dados para matérias, sessões, flashcards, simulados, metas e trechos de materiais com embeddings.
@@ -29,13 +29,13 @@ Plataforma de estudos com IA, desenvolvida com React, TypeScript, Vite e Supabas
 Sem sessão autenticada, o site mostra dados de demonstração; os dados privados só são sincronizados após login.
 
 ## Configuração do backend de IA
-A Edge Function `study-assistant` está implantada no projeto Supabase e exige JWT válido. O responsável pelo projeto informou que já cadastrou `OPENAI_API_KEY` em Supabase → Edge Functions → Secrets. O valor do segredo não é legível pelas ferramentas conectadas e nunca é armazenado no repositório. A função utiliza `gpt-4.1-mini` pela Responses API. O teste ponta a ponta ainda depende de executar uma conversa autenticada na aplicação.
+As Edge Functions `study-assistant` e `process-material` estão implantadas no projeto Supabase e exigem JWT válido. `process-material` extrai texto de PDF textual, DOCX, PPTX, TXT e CSV e gera embeddings com `text-embedding-3-small`. O responsável pelo projeto informou que já cadastrou `OPENAI_API_KEY` em Supabase → Edge Functions → Secrets. O valor do segredo não é legível pelas ferramentas conectadas e nunca é armazenado no repositório. A função utiliza `gpt-4.1-mini` pela Responses API. O teste ponta a ponta ainda depende de executar upload e conversa com uma conta autenticada na aplicação.
 
 ## Banco de dados
 A estrutura foi aplicada no projeto Supabase `bpjvbfjtbczpvkdpzrht`. Inclui perfis, matérias, tarefas, materiais, chunks vetoriais, sessões, conversas, mensagens, flashcards, simulados, tentativas, respostas e metas. Todas as tabelas têm RLS habilitado.
 
 ## Publicação
-O GitHub Actions compila o frontend e tenta publicar no GitHub Pages. O Pages hospeda somente a aplicação estática; Auth, banco, storage e IA são fornecidos pelo Supabase.
+O GitHub Actions compila o frontend e publica no GitHub Pages. O último deploy confirmado concluiu build e deploy com sucesso. O Pages hospeda somente a aplicação estática; Auth, banco, storage e IA são fornecidos pelo Supabase.
 
 ## Segurança
 - Não inclua chaves privadas, service-role ou OpenAI no código do navegador.
@@ -45,4 +45,4 @@ O GitHub Actions compila o frontend e tenta publicar no GitHub Pages. O Pages ho
 - A função de IA exige sessão autenticada e limita o tamanho da entrada.
 
 ## Estado atual
-A fundação do banco e a Edge Function já estão implantadas. `OPENAI_API_KEY` foi informada como cadastrada nos Secrets; falta validar uma conversa autenticada de ponta a ponta. O fluxo de upload armazena os arquivos e registra seus metadados; extração de texto/OCR e indexação vetorial ainda precisam ser implementadas. A geração completa de simulados e flashcards e o aplicativo Tauri também permanecem em desenvolvimento.
+A fundação do banco e as Edge Functions estão implantadas. `OPENAI_API_KEY` foi informada como cadastrada nos Secrets; falta validar uma sessão real de upload, indexação e conversa. O processamento de PDF textual, DOCX, PPTX, TXT e CSV e a busca vetorial pelo tutor estão implementados. PDFs digitalizados e imagens ainda precisam de OCR. A geração completa de simulados e flashcards e o aplicativo Tauri permanecem em desenvolvimento.
