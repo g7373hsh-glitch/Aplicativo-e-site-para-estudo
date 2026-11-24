@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Activity, ArrowRight, ArrowUpRight, Bell, BookOpen, BrainCircuit, CalendarDays, Check, ChevronDown, ChevronLeft, ChevronRight, Clock3, FileText, Flame, FolderOpen, LayoutDashboard, LogOut, Menu, MoreHorizontal, Plus, Search, Settings2, Sparkles, Target, Upload, X, Zap } from "lucide-react";
+import { Activity, ArrowRight, Bell, BookOpen, BrainCircuit, CalendarDays, Check, ChevronDown, ChevronLeft, ChevronRight, Clock3, FileText, Flame, FolderOpen, LayoutDashboard, LogOut, Menu, MoreHorizontal, Plus, Search, Settings2, Sparkles, Target, Upload, X, Zap } from "lucide-react";
 import { supabase, isSupabaseConfigured } from "./lib/supabase";
 import { askStudyAI } from "./lib/ai";
 
@@ -76,6 +76,7 @@ function App() {
     }; void load(); return()=>{alive=false;}; }, [userEmail]);
   useEffect(() => {
     if(!isStudyMode||!supabase||!userEmail)return;
+    const client=supabase;
     let alive=true;
     let creating=false;
     let lastActivity=Date.now();
@@ -84,13 +85,13 @@ function App() {
       const current=studySessionRef.current;
       if(!current||!supabase)return;
       studySessionRef.current=null;
-      await supabase.from("study_sessions").update({ended_at:new Date().toISOString(),duration_seconds:current.seconds}).eq("id",current.id);
+      await client.from("study_sessions").update({ended_at:new Date().toISOString(),duration_seconds:current.seconds}).eq("id",current.id);
     };
     const startSession=async()=>{
       if(creating||studySessionRef.current||!supabase)return;
       creating=true;
       const startedAt=new Date().toISOString();
-      const {data,error}=await supabase.from("study_sessions").insert({started_at:startedAt,duration_seconds:0,notes:mode}).select("id").single();
+      const {data,error}=await client.from("study_sessions").insert({started_at:startedAt,duration_seconds:0,notes:mode}).select("id").single();
       creating=false;
       if(!alive||error||!data)return;
       studySessionRef.current={id:data.id,seconds:0,startedAt};
@@ -113,7 +114,7 @@ function App() {
         current.seconds+=1;
         setStudySeconds(total=>total+1);
         if(current.seconds%15===0){
-          await supabase.from("study_sessions").update({duration_seconds:current.seconds}).eq("id",current.id);
+          await client.from("study_sessions").update({duration_seconds:current.seconds}).eq("id",current.id);
         }
       })();
     },1000);
