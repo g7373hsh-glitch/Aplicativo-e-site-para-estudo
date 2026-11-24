@@ -5,6 +5,10 @@ import { askStudyAI } from "./lib/ai";
 
 type Task = { id: string; title: string; subject: string; time: string; done: boolean };
 type Material = { id:string; file_name:string; storage_path:string; size_bytes:number|null; processing_status:string; processing_error?:string|null; created_at:string };
+type Quiz = {id:string;title:string;difficulty:string;question_count:number;created_at:string};
+type QuizQuestion = {id:string;position:number;question:string;options:string[];correct_answer:number;explanation:string};
+type FlashDeck = {id:string;title:string;created_at:string};
+type Flashcard = {id:string;deck_id:string;front:string;back:string;interval_days:number;repetitions:number;ease_factor:number;due_at:string|null};
 const initialTasks: Task[] = [
   { id: "demo-1", title: "Revisar funções do 2º grau", subject: "Matemática", time: "09:30", done: false },
   { id: "demo-2", title: "Ler capítulo 04 — Citologia", subject: "Biologia", time: "11:00", done: false },
@@ -31,6 +35,20 @@ function App() {
   const [conversationId, setConversationId] = useState<string|null>(null);
   const [fileName, setFileName] = useState("");
   const [materials, setMaterials] = useState<Material[]>([]);
+  const [quizzes,setQuizzes]=useState<Quiz[]>([]);
+  const [decks,setDecks]=useState<FlashDeck[]>([]);
+  const [selectedQuiz,setSelectedQuiz]=useState<Quiz|null>(null);
+  const [quizQuestions,setQuizQuestions]=useState<QuizQuestion[]>([]);
+  const [quizAnswers,setQuizAnswers]=useState<Record<string,number>>({});
+  const [quizAttemptId,setQuizAttemptId]=useState<string|null>(null);
+  const [quizResult,setQuizResult]=useState<{score:number;correct:number;total:number}|null>(null);
+  const [activeDeck,setActiveDeck]=useState<FlashDeck|null>(null);
+  const [deckCards,setDeckCards]=useState<Flashcard[]>([]);
+  const [cardIndex,setCardIndex]=useState(0);
+  const [cardFlipped,setCardFlipped]=useState(false);
+  const [activityLoading,setActivityLoading]=useState(false);
+  const [activityCount,setActivityCount]=useState(10);
+  const [activityDifficulty,setActivityDifficulty]=useState("medium");
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [userEmail, setUserEmail] = useState<string|null>(null);
   const [authEmail, setAuthEmail] = useState("");
@@ -39,8 +57,12 @@ function App() {
   const [toast, setToast] = useState("");
   const [weekOffset, setWeekOffset] = useState(0);
   useEffect(() => { if (!userEmail) localStorage.setItem("study-ai-tasks", JSON.stringify(tasks)); }, [tasks,userEmail]);
-  useEffect(() => { if (!supabase) return; supabase.auth.getSession().then(({data}) => setUserEmail(data.session?.user.email ?? null)); const {data}=supabase.auth.onAuthStateChange((_e,s)=>{ setUserEmail(s?.user.email??null); setConversationId(null); setAnswer(""); if(!s?.user){setTasks(initialTasks);setFileName("");setMaterials([]);} }); return ()=>data.subscription.unsubscribe(); }, []);
-  useEffect(() => { let alive=true; const load=async()=>{ if(!supabase||!userEmail) return; const {data,error}=await supabase.from("study_tasks").select("id,title,completed_at,due_at,subjects(name)").order("created_at",{ascending:false}); if(!alive)return; if(error){notify("Não foi possível carregar suas tarefas.");return;} setTasks((data??[]).map((t:any)=>({id:t.id,title:t.title,subject:t.subjects?.name??"Geral",time:t.due_at?new Date(t.due_at).toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"}):"Sem horário",done:Boolean(t.completed_at)}))); const {data:files,error:fileError}=await supabase.from("study_materials").select("id,file_name,storage_path,size_bytes,processing_status,created_at").order("created_at",{ascending:false}); if(alive&&!fileError)setMaterials(files??[]); }; void load(); return()=>{alive=false;}; }, [userEmail]);
+  useEffect(() => { if (!supabase) return; supabase.auth.getSession().then(({data}) => setUserEmail(data.session?.user.email ?? null)); const {data}=supabase.auth.onAuthStateChange((_e,s)=>{ setUserEmail(s?.user.email??null); setConversationId(null); setAnswer(""); if(!s?.user){setTasks(initialTasks);setFileName("");setMaterials([]);setQuizzes([]);setDecks([]);setSelectedQuiz(null);setActiveDeck(null);setQuizQuestions([]);setDeckCards([]);} }); return ()=>data.subscription.unsubscribe(); }, []);
+  useEffect(() => { let alive=true; const load=async()=>{ if(!supabase||!userEmail) return; const {data,error}=await supabase.from("study_tasks").select("id,title,completed_at,due_at,subjects(name)").order("created_at",{ascending:false}); if(!alive)return; if(error){notify("Não foi possível carregar suas tarefas.");return;} setTasks((data??[]).map((t:any)=>({id:t.id,title:t.title,subject:t.subjects?.name??"Geral",time:t.due_at?new Date(t.due_at).toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"}):"Sem horário",done:Boolean(t.completed_at)}))); const {data:files,error:fileError}=await supabase.from("study_materials").select("id,file_name,storage_path,size_bytes,processing_status,created_at").order("created_at",{ascending:false}); if(alive&&!fileError)setMaterials(files??[]);
+      const {data:quizData}=await supabase.from("quizzes").select("id,title,difficulty,question_count,created_at").order("created_at",{ascending:false}).limit(30);
+      if(alive)setQuizzes(quizData??[]);
+      const {data:deckData}=await supabase.from("flashcard_decks").select("id,title,created_at").order("created_at",{ascending:false}).limit(30);
+      if(alive)setDecks(deckData??[]); }; void load(); return()=>{alive=false;}; }, [userEmail]);
   const completed = tasks.filter(t=>t.done).length;
   const progress = tasks.length ? Math.round(completed/tasks.length*100) : 0;
   const notify = (message:string) => { setToast(message); window.setTimeout(()=>setToast(""),2800); };
@@ -122,6 +144,68 @@ function App() {
     if(error){notify("Arquivo removido do armazenamento, mas o registro não foi excluído.");return;}
     setMaterials(prev=>prev.filter(m=>m.id!==material.id)); notify("Material excluído.");
   };
+  const generateActivity=async(kind:"quiz"|"flashcards")=>{
+    if(!supabase||!userEmail){notify("Entre na sua conta para salvar suas atividades.");return;}
+    if(activityLoading)return;
+    setActivityLoading(true);
+    try{
+      const {data,error}=await supabase.functions.invoke("study-generator",{body:{kind,count:activityCount,difficulty:activityDifficulty}});
+      if(error||data?.error)throw new Error(data?.error||error?.message||"Falha ao gerar atividade.");
+      if(kind==="quiz"){
+        const quiz=data.quiz as Quiz;
+        const {data:questions,error:qError}=await supabase.from("quiz_questions").select("id,position,question,options,correct_answer,explanation").eq("quiz_id",quiz.id).order("position");
+        if(qError||!questions)throw new Error("Simulado criado, mas não foi possível carregar as questões.");
+        setQuizzes(prev=>[quiz,...prev.filter(q=>q.id!==quiz.id)]);
+        setSelectedQuiz(quiz);setQuizQuestions(questions as QuizQuestion[]);setQuizAnswers({});setQuizAttemptId(null);setQuizResult(null);
+        notify("Simulado gerado com base nos seus materiais.");
+      }else{
+        setDecks(prev=>[data.deck,...prev.filter(d=>d.id!==data.deck.id)]);
+        await openDeck(data.deck as FlashDeck);
+        notify("Baralho de flashcards criado com sucesso.");
+      }
+    }catch(e){notify(e instanceof Error?e.message:"Não foi possível gerar a atividade.");}
+    finally{setActivityLoading(false);}
+  };
+  const openQuiz=async(quiz:Quiz)=>{
+    if(!supabase)return;
+    const {data,error}=await supabase.from("quiz_questions").select("id,position,question,options,correct_answer,explanation").eq("quiz_id",quiz.id).order("position");
+    if(error||!data){notify("Não foi possível abrir o simulado.");return;}
+    setSelectedQuiz(quiz);setQuizQuestions(data as QuizQuestion[]);setQuizAnswers({});setQuizAttemptId(null);setQuizResult(null);
+  };
+  const finishQuiz=async()=>{
+    if(!supabase||!selectedQuiz||!userEmail||quizResult)return;
+    const unanswered=quizQuestions.filter(q=>quizAnswers[q.id]===undefined).length;
+    if(unanswered){notify("Responda todas as questões antes de finalizar.");return;}
+    const {data:{user}}=await supabase.auth.getUser();if(!user)return;
+    let attemptId=quizAttemptId;
+    if(!attemptId){const {data,error}=await supabase.from("quiz_attempts").insert({user_id:user.id,quiz_id:selectedQuiz.id,total_questions:quizQuestions.length}).select("id").single();if(error||!data){notify("Não foi possível registrar sua tentativa.");return;}attemptId=data.id;setQuizAttemptId(attemptId);}
+    const correct=quizQuestions.filter(q=>quizAnswers[q.id]===Number(q.correct_answer)).length;
+    const score=Math.round(correct/quizQuestions.length*100);
+    const rows=quizQuestions.map(q=>({user_id:user.id,attempt_id:attemptId!,question_id:q.id,answer:quizAnswers[q.id],is_correct:quizAnswers[q.id]===Number(q.correct_answer)}));
+    const {error:answersError}=await supabase.from("quiz_answers").upsert(rows,{onConflict:"attempt_id,question_id"});
+    if(answersError){notify("Não foi possível salvar suas respostas.");return;}
+    const {error:updateError}=await supabase.from("quiz_attempts").update({finished_at:new Date().toISOString(),score,total_questions:quizQuestions.length,correct_count:correct}).eq("id",attemptId);
+    if(updateError){notify("Respostas salvas, mas houve falha ao registrar a nota.");return;}
+    setQuizResult({score,correct,total:quizQuestions.length});
+  };
+  const openDeck=async(deck:FlashDeck)=>{
+    if(!supabase)return;
+    const {data,error}=await supabase.from("flashcards").select("id,deck_id,front,back,interval_days,repetitions,ease_factor,due_at").eq("deck_id",deck.id).order("created_at");
+    if(error||!data){notify("Não foi possível abrir o baralho.");return;}
+    setActiveDeck(deck);setDeckCards(data as Flashcard[]);setCardIndex(0);setCardFlipped(false);
+  };
+  const reviewCard=async(rating:"again"|"good"|"easy")=>{
+    if(!supabase||!activeDeck||!deckCards[cardIndex])return;
+    const card=deckCards[cardIndex],now=new Date(),old=card.interval_days||0;
+    const interval=rating==="again"?1:rating==="good"?(old===0?1:old===1?3:Math.max(4,Math.round(old*2.5))):(old===0?3:Math.max(7,Math.round(old*3.5)));
+    const repetitions=rating==="again"?0:card.repetitions+1;
+    const ease=Math.max(1.3,Number(card.ease_factor)+(rating==="easy"?0.15:rating==="again"?-0.2:0));
+    const due=new Date(now.getTime()+interval*86400000).toISOString();
+    const {error}=await supabase.from("flashcards").update({interval_days:interval,repetitions,ease_factor:ease,last_reviewed_at:now.toISOString(),due_at:due,updated_at:now.toISOString()}).eq("id",card.id);
+    if(error){notify("Não foi possível salvar sua revisão.");return;}
+    setDeckCards(prev=>prev.filter((_,i)=>i!==cardIndex));
+    setCardFlipped(false);setCardIndex(0);
+  };
   const title = active === "Visão geral" ? "Visão geral" : active;
   const week = useMemo(()=>["SEG","TER","QUA","QUI","SEX","SÁB","DOM"].map((d,i)=>({d,n:((17+i+weekOffset*7-1)%31)+1})),[weekOffset]);
   return <div className="app-shell">
@@ -154,8 +238,19 @@ function App() {
         </> : <section className="section-placeholder panel">
           {active==="Meu tutor IA"?<><div className="placeholder-icon"><BrainCircuit size={25}/></div><h2>Seu tutor, sempre por perto.</h2><p>Faça perguntas, peça explicações e aprofunde seus estudos. O tutor consulta os trechos relevantes dos seus materiais privados quando disponíveis.</p><div className="chat-demo"><div className="chat-bubble bot"><Sparkles size={15}/> Olá! Sou seu espaço de tutoria. Como posso ajudar nos seus estudos?</div>{answer&&<div className="chat-bubble bot">{answer}</div>}{aiLoading&&<div className="chat-bubble bot"><Sparkles size={15}/> Preparando sua explicação...</div>}<div className="chat-compose"><input value={question} onChange={e=>setQuestion(e.target.value)} onKeyDown={e=>e.key==="Enter"&&askTutor()} placeholder="Digite sua dúvida..." disabled={aiLoading}/><button onClick={askTutor} disabled={aiLoading}><ArrowRight size={17}/></button></div></div></>:
           active==="Materiais"?<><div className="placeholder-icon"><FolderOpen size={25}/></div><h2>Seu conhecimento, em um só lugar.</h2><p>Organize PDFs, documentos e anotações. O armazenamento privado e a análise inteligente dependem da configuração do backend.</p><button className="primary-btn" onClick={()=>setModal("upload")}><Upload size={16}/> Adicionar material</button>{materials.length>0&&<div className="material-library">{materials.map(m=><div className="uploaded-file" key={m.id}><FileText size={18}/><div className="material-file-meta"><strong>{m.file_name}</strong><span>{m.size_bytes?`${(m.size_bytes/1024/1024).toFixed(1)} MB`:"Arquivo"} · {m.processing_status==="ready"?"Lido e indexado":m.processing_status==="processing"?"Lendo material":m.processing_status==="failed"?"Falha na leitura": "Aguardando análise"}</span></div><button className="secondary-btn" onClick={()=>openMaterial(m.storage_path)}>Abrir</button><button className="icon-btn" onClick={()=>deleteMaterial(m)} title="Excluir material"><X size={15}/></button></div>)}</div>}{materials.length===0&&fileName&&<div className="uploaded-file"><FileText size={18}/>{fileName}<span>Enviado nesta sessão</span></div>}</>:
-          active==="Simulados"?<><div className="placeholder-icon"><Target size={25}/></div><h2>Pratique para chegar mais longe.</h2><p>O motor de IA já consegue consultar seus materiais indexados. A criação e correção de simulados ainda está em desenvolvimento.</p><button className="primary-btn" onClick={()=>notify("O gerador de simulados será conectado ao motor de IA.")}>Preparar simulado <ArrowRight size={16}/></button></>:
-          active==="Flashcards"?<><div className="placeholder-icon"><Zap size={25}/></div><h2>Memorize no seu ritmo.</h2><p>Flashcards com revisão espaçada para transformar conteúdo em conhecimento duradouro.</p><div className="flashcard" onClick={e=>e.currentTarget.classList.toggle("flipped")}><span>TOQUE PARA REVELAR</span><strong>O que é fotossíntese?</strong><small>Resposta no verso ↗</small></div></>:
+          active==="Simulados"?<><div className="placeholder-icon"><Target size={25}/></div><h2>Simulados personalizados</h2><p>Gere questões a partir dos materiais que você já enviou e receba correção automática com explicações.</p>
+            <div className="activity-controls"><label>Questões<select value={activityCount} onChange={e=>setActivityCount(Number(e.target.value))}><option value={5}>5 questões</option><option value={10}>10 questões</option><option value={15}>15 questões</option><option value={20}>20 questões</option></select></label><label>Dificuldade<select value={activityDifficulty} onChange={e=>setActivityDifficulty(e.target.value)}><option value="easy">Fácil</option><option value="medium">Média</option><option value="hard">Difícil</option><option value="mixed">Mista</option></select></label></div>
+            <button className="primary-btn" disabled={activityLoading} onClick={()=>generateActivity("quiz")}>{activityLoading?"Gerando...":"Gerar simulado com meus materiais"} <Sparkles size={16}/></button>
+            {selectedQuiz?<div className="activity-workspace"><div className="activity-heading"><div><strong>{selectedQuiz.title}</strong><small>{quizQuestions.length} questões · {selectedQuiz.difficulty}</small></div><button className="secondary-btn" onClick={()=>{setSelectedQuiz(null);setQuizResult(null);}}>Voltar</button></div>
+              {quizQuestions.map((q,i)=><div className="quiz-question" key={q.id}><strong>{i+1}. {q.question}</strong><div className="quiz-options">{(q.options as string[]).map((option,j)=><button key={j} disabled={!!quizResult} className={quizResult?(j===Number(q.correct_answer)?"option-correct":quizAnswers[q.id]===j?"option-wrong":""):(quizAnswers[q.id]===j?"option-selected":"")} onClick={()=>setQuizAnswers(prev=>({...prev,[q.id]:j}))}><span>{String.fromCharCode(65+j)}</span>{option}</button>)}</div>{quizResult&&<div className="quiz-explanation"><b>{quizAnswers[q.id]===Number(q.correct_answer)?"Correto!":"Resposta correta: "+String.fromCharCode(65+Number(q.correct_answer))}</b><p>{q.explanation}</p></div>}</div>)}
+              {quizResult?<div className="quiz-result"><strong>{quizResult.score}%</strong><span>{quizResult.correct} de {quizResult.total} acertos</span><button className="primary-btn" onClick={()=>{setSelectedQuiz(null);setQuizResult(null);}}>Concluir</button></div>:<button className="primary-btn full-btn" onClick={finishQuiz}>Finalizar e corrigir simulado</button>}
+            </div>:<div className="activity-library"><strong>Seus simulados</strong>{quizzes.length?quizzes.map(q=><button className="activity-list-item" key={q.id} onClick={()=>openQuiz(q)}><Target size={17}/><span><b>{q.title}</b><small>{q.question_count} questões · {new Date(q.created_at).toLocaleDateString("pt-BR")}</small></span><ArrowRight size={15}/></button>):<small>Seus simulados gerados aparecerão aqui.</small>}</div>}</>:
+          active==="Flashcards"?<><div className="placeholder-icon"><Zap size={25}/></div><h2>Revisão inteligente</h2><p>Crie baralhos automaticamente a partir dos seus arquivos e revise com intervalos progressivos.</p>
+            <div className="activity-controls"><label>Cartões<select value={activityCount} onChange={e=>setActivityCount(Number(e.target.value))}><option value={5}>5 cartões</option><option value={10}>10 cartões</option><option value={15}>15 cartões</option><option value={20}>20 cartões</option></select></label><span className="activity-hint">Baseado nos materiais processados</span></div>
+            <button className="primary-btn" disabled={activityLoading} onClick={()=>generateActivity("flashcards")}>{activityLoading?"Gerando...":"Gerar flashcards com IA"} <Sparkles size={16}/></button>
+            {activeDeck?<div className="activity-workspace"><div className="activity-heading"><div><strong>{activeDeck.title}</strong><small>{deckCards.length} cartões restantes nesta sessão</small></div><button className="secondary-btn" onClick={()=>setActiveDeck(null)}>Voltar</button></div>
+              {deckCards.length>0?<><button className={"review-card "+(cardFlipped?"review-card-back":"")} onClick={()=>setCardFlipped(v=>!v)}><small>{cardFlipped?"RESPOSTA":"PERGUNTA"} · TOQUE PARA VIRAR</small><strong>{cardFlipped?deckCards[cardIndex].back:deckCards[cardIndex].front}</strong></button>{cardFlipped&&<div className="review-actions"><button onClick={()=>reviewCard("again")}>Rever amanhã</button><button onClick={()=>reviewCard("good")}>Lembrei</button><button onClick={()=>reviewCard("easy")}>Fácil</button></div>}</>:<div className="quiz-result"><strong>Revisão concluída!</strong><span>Você revisou todos os cartões desta sessão.</span></div>}
+            </div>:<div className="activity-library"><strong>Seus baralhos</strong>{decks.length?decks.map(d=><button className="activity-list-item" key={d.id} onClick={()=>openDeck(d)}><Zap size={17}/><span><b>{d.title}</b><small>{new Date(d.created_at).toLocaleDateString("pt-BR")}</small></span><ArrowRight size={15}/></button>):<small>Seus baralhos gerados aparecerão aqui.</small>}</div>}</>:
           <><div className="placeholder-icon"><CalendarDays size={25}/></div><h2>Planeje sua evolução.</h2><p>Crie metas, organize matérias e acompanhe seu cronograma de estudos.</p><button className="primary-btn" onClick={()=>setModal("task")}><Plus size={16}/> Adicionar tarefa</button><div className="plan-summary"><strong>Seu plano atual</strong><span>{tasks.length} tarefas · {completed} concluídas</span><div className="progress-track"><i style={{width:progress+"%"}}/></div></div></>}
         </section>}
         <footer className="footer"><span>© 2026 STUDY AI</span><span>Feito para aprender melhor <span className="footer-heart">✦</span></span><span className={isSupabaseConfigured?"connection-ok":"connection-demo"}>{isSupabaseConfigured?"● Conexão configurada":"● Modo demonstração"}</span></footer>
