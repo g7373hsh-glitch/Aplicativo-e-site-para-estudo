@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Activity, ArrowRight, ArrowUpRight, Bell, BookOpen, BrainCircuit, CalendarDays, Check, ChevronDown, ChevronLeft, ChevronRight, Clock3, FileText, Flame, FolderOpen, LayoutDashboard, LogOut, Menu, MoreHorizontal, Plus, Search, Settings2, Sparkles, Target, Upload, X, Zap } from "lucide-react";
 import { supabase, isSupabaseConfigured } from "./lib/supabase";
 import { askStudyAI } from "./lib/ai";
@@ -56,6 +56,9 @@ function App() {
   const [studyDates,setStudyDates]=useState<string[]>([]);
   const [averageScore,setAverageScore]=useState<number|null>(null);
   const [subjects,setSubjects]=useState<{id:string;name:string;color:string;seconds:number}[]>([]);
+  const studySessionRef=useRef<{id:string;seconds:number;startedAt:string}|null>(null);
+  const isStudyMode=Boolean(userEmail&&((selectedQuiz&&!quizResult)||activeDeck||(active==="Meu tutor IA"&&conversationId)));
+
   useEffect(() => { if (!userEmail) localStorage.setItem("study-ai-tasks", JSON.stringify(tasks)); }, [tasks,userEmail]);
   useEffect(() => { if (!supabase) return; let alive=true; void supabase.auth.getSession().then(({data,error})=>{ if(alive){ if(error) setAuthMessage("Não foi possível restaurar sua sessão. Entre novamente."); setUserEmail(data.session?.user.email??null); } }); const {data}=supabase.auth.onAuthStateChange((event,session)=>{ setUserEmail(session?.user.email??null); setConversationId(null); setAnswer(""); if(session?.user){ setModal(null); if(event==="SIGNED_IN") setAuthMessage("Login realizado com sucesso."); } else { setTasks(initialTasks);setFileName("");setMaterials([]);setQuizzes([]);setDecks([]);setSelectedQuiz(null);setActiveDeck(null);setQuizQuestions([]);setDeckCards([]); } }); return ()=>{alive=false;data.subscription.unsubscribe();}; }, []);
   useEffect(() => { let alive=true; const load=async()=>{ if(!supabase||!userEmail) return; const {data,error}=await supabase.from("study_tasks").select("id,title,completed_at,due_at,subjects(name)").order("created_at",{ascending:false}); if(!alive)return; if(error){notify("Não foi possível carregar suas tarefas.");return;} setTasks((data??[]).map((t:any)=>({id:t.id,title:t.title,subject:t.subjects?.name??"Geral",time:t.due_at?new Date(t.due_at).toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"}):"Sem horário",dueAt:t.due_at??null,done:Boolean(t.completed_at)}))); const {data:files,error:fileError}=await supabase.from("study_materials").select("id,file_name,storage_path,size_bytes,processing_status,created_at").order("created_at",{ascending:false}); if(alive&&!fileError)setMaterials(files??[]);
@@ -71,6 +74,59 @@ function App() {
       const {data:subjectSessions}=await supabase.from("study_sessions").select("subject_id,duration_seconds").gt("duration_seconds",0);
       if(alive){const totals=new Map<string,number>();(subjectSessions??[]).forEach((row:any)=>{if(row.subject_id)totals.set(row.subject_id,(totals.get(row.subject_id)??0)+(row.duration_seconds??0));});setSubjects((subjectData??[]).map((row:any)=>({id:row.id,name:row.name,color:row.color||subjectColors[row.name]||"#9b8cff",seconds:totals.get(row.id)??0})));}
     }; void load(); return()=>{alive=false;}; }, [userEmail]);
+  useEffect(() => {
+    if(!isStudyMode||!supabase||!userEmail)return;
+    let alive=true;
+    let creating=false;
+    let lastActivity=Date.now();
+    const mode=selectedQuiz&&!quizResult?"Simulado: "+selectedQuiz.title:activeDeck?"Flashcards: "+activeDeck.title:"Tutor IA";
+    const closeSession=async()=>{
+      const current=studySessionRef.current;
+      if(!current||!supabase)return;
+      studySessionRef.current=null;
+      await supabase.from("study_sessions").update({ended_at:new Date().toISOString(),duration_seconds:current.seconds}).eq("id",current.id);
+    };
+    const startSession=async()=>{
+      if(creating||studySessionRef.current||!supabase)return;
+      creating=true;
+      const startedAt=new Date().toISOString();
+      const {data,error}=await supabase.from("study_sessions").insert({started_at:startedAt,duration_seconds:0,notes:mode}).select("id").single();
+      creating=false;
+      if(!alive||error||!data)return;
+      studySessionRef.current={id:data.id,seconds:0,startedAt};
+    };
+    const markActivity=()=>{lastActivity=Date.now();};
+    const onVisibility=()=>{if(document.visibilityState==="hidden")void closeSession();else markActivity();};
+    window.addEventListener("pointerdown",markActivity,{passive:true});
+    window.addEventListener("keydown",markActivity);
+    window.addEventListener("touchstart",markActivity,{passive:true});
+    document.addEventListener("visibilitychange",onVisibility);
+    const interval=window.setInterval(()=>{
+      if(document.visibilityState==="hidden"||Date.now()-lastActivity>90000){
+        void closeSession();
+        return;
+      }
+      void (async()=>{
+        if(!studySessionRef.current)await startSession();
+        const current=studySessionRef.current;
+        if(!current)return;
+        current.seconds+=1;
+        setStudySeconds(total=>total+1);
+        if(current.seconds%15===0){
+          await supabase.from("study_sessions").update({duration_seconds:current.seconds}).eq("id",current.id);
+        }
+      })();
+    },1000);
+    return()=>{
+      alive=false;
+      window.clearInterval(interval);
+      window.removeEventListener("pointerdown",markActivity);
+      window.removeEventListener("keydown",markActivity);
+      window.removeEventListener("touchstart",markActivity);
+      document.removeEventListener("visibilitychange",onVisibility);
+      void closeSession();
+    };
+  },[isStudyMode,userEmail,selectedQuiz?.id,quizResult,activeDeck?.id,active,conversationId]);
   const completed = tasks.filter(t=>t.done).length;
   const progress = tasks.length ? Math.round(completed/tasks.length*100) : 0;
   const notify = (message:string) => { setToast(message); window.setTimeout(()=>setToast(""),2800); };
