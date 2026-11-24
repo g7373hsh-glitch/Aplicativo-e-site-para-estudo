@@ -39,7 +39,7 @@ function App() {
   const [toast, setToast] = useState("");
   const [weekOffset, setWeekOffset] = useState(0);
   useEffect(() => { if (!userEmail) localStorage.setItem("study-ai-tasks", JSON.stringify(tasks)); }, [tasks,userEmail]);
-  useEffect(() => { if (!supabase) return; supabase.auth.getSession().then(({data}) => setUserEmail(data.session?.user.email ?? null)); const {data}=supabase.auth.onAuthStateChange((_e,s)=>{ setUserEmail(s?.user.email??null); setConversationId(null); setAnswer(""); if(!s?.user){setTasks(initialTasks);setFileName("");} }); return ()=>data.subscription.unsubscribe(); }, []);
+  useEffect(() => { if (!supabase) return; supabase.auth.getSession().then(({data}) => setUserEmail(data.session?.user.email ?? null)); const {data}=supabase.auth.onAuthStateChange((_e,s)=>{ setUserEmail(s?.user.email??null); setConversationId(null); setAnswer(""); if(!s?.user){setTasks(initialTasks);setFileName("");setMaterials([]);} }); return ()=>data.subscription.unsubscribe(); }, []);
   useEffect(() => { let alive=true; const load=async()=>{ if(!supabase||!userEmail) return; const {data,error}=await supabase.from("study_tasks").select("id,title,completed_at,due_at,subjects(name)").order("created_at",{ascending:false}); if(!alive)return; if(error){notify("Não foi possível carregar suas tarefas.");return;} setTasks((data??[]).map((t:any)=>({id:t.id,title:t.title,subject:t.subjects?.name??"Geral",time:t.due_at?new Date(t.due_at).toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"}):"Sem horário",done:Boolean(t.completed_at)}))); const {data:files,error:fileError}=await supabase.from("study_materials").select("id,file_name,storage_path,size_bytes,processing_status,created_at").order("created_at",{ascending:false}); if(alive&&!fileError)setMaterials(files??[]); }; void load(); return()=>{alive=false;}; }, [userEmail]);
   const completed = tasks.filter(t=>t.done).length;
   const progress = tasks.length ? Math.round(completed/tasks.length*100) : 0;
@@ -104,7 +104,7 @@ function App() {
     if(!supabase)return;
     const {data,error}=await supabase.storage.from("study-materials").createSignedUrl(path,60);
     if(error||!data){notify("Não foi possível abrir o arquivo.");return;}
-    window.open(data.signedUrl,"_blank","noopener,noreferrer");
+    window.location.assign(data.signedUrl);
   };
   const deleteMaterial = async (material:Material) => {
     if(!supabase)return;
@@ -155,7 +155,7 @@ function App() {
     </main>
     {modal&&<div className="modal-backdrop" onMouseDown={e=>e.target===e.currentTarget&&setModal(null)}><div className="modal"><div className="modal-head"><div><span className="eyebrow">STUDY AI</span><h2>{modal==="task"?"Nova tarefa":modal==="upload"?"Adicionar material":modal==="auth"?"Sua conta":"Tutor IA"}</h2></div><button className="icon-btn" onClick={()=>setModal(null)}><X size={19}/></button></div>
       {modal==="task"&&<><label>O que você precisa estudar?</label><input className="field" autoFocus value={taskTitle} onChange={e=>setTaskTitle(e.target.value)} onKeyDown={e=>e.key==="Enter"&&addTask()} placeholder="Ex.: Revisar geometria analítica"/><button className="primary-btn full-btn" onClick={addTask}>Adicionar ao plano <ArrowRight size={16}/></button></>}
-      {modal==="upload"&&<label className="dropzone"><Upload size={25}/><strong>Escolha um arquivo para começar</strong><span>PDF, DOCX, PPTX, TXT ou imagem</span><input type="file" accept=".pdf,.doc,.docx,.ppt,.pptx,.txt,.png,.jpg,.jpeg" onChange={e=>uploadFile(e.target.files?.[0])}/></label>}
+      {modal==="upload"&&<label className="dropzone"><Upload size={25}/><strong>Escolha um arquivo para começar</strong><span>PDF, DOCX, PPTX, TXT ou imagem</span><input type="file" accept=".pdf,.docx,.pptx,.txt,.csv,.png,.jpg,.jpeg,.webp" onChange={e=>uploadFile(e.target.files?.[0])}/></label>}
       {modal==="auth"&&<><p className="modal-description">Entre ou crie sua conta para sincronizar seus estudos em todos os dispositivos.</p><label>E-mail</label><input className="field" type="email" value={authEmail} onChange={e=>setAuthEmail(e.target.value)} placeholder="voce@email.com"/><label>Senha</label><input className="field" type="password" value={authPassword} onChange={e=>setAuthPassword(e.target.value)} placeholder="Mínimo de 6 caracteres"/><div className="auth-actions"><button className="primary-btn" onClick={signIn}>Entrar</button><button className="secondary-btn" onClick={signUp}>Criar conta</button></div>{authMessage&&<p className="form-message">{authMessage}</p>}</>}
       {modal==="assistant"&&<><p className="modal-description">O tutor está pronto para receber sua dúvida. A geração de respostas reais será ativada após conectar o backend de IA.</p><input className="field" value={question} onChange={e=>setQuestion(e.target.value)} placeholder="O que você quer aprender?" disabled={aiLoading}/><button className="primary-btn full-btn" onClick={()=>{void askTutor();setModal(null);}}>Enviar pergunta <ArrowRight size={16}/></button></>}
     </div></div>}
