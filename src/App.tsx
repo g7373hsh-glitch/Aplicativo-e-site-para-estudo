@@ -88,10 +88,12 @@ function App() {
       await client.from("study_sessions").update({ended_at:new Date().toISOString(),duration_seconds:current.seconds}).eq("id",current.id);
     };
     const startSession=async()=>{
-      if(creating||studySessionRef.current||!supabase)return;
+      if(creating||studySessionRef.current)return;
       creating=true;
+      const {data:{user},error:userError}=await client.auth.getUser();
+      if(userError||!user){creating=false;return;}
       const startedAt=new Date().toISOString();
-      const {data,error}=await client.from("study_sessions").insert({started_at:startedAt,duration_seconds:0,notes:mode}).select("id").single();
+      const {data,error}=await client.from("study_sessions").insert({user_id:user.id,started_at:startedAt,duration_seconds:0,notes:mode}).select("id").single();
       creating=false;
       if(!alive||error||!data)return;
       studySessionRef.current={id:data.id,seconds:0,startedAt};
@@ -103,7 +105,7 @@ function App() {
     window.addEventListener("touchstart",markActivity,{passive:true});
     document.addEventListener("visibilitychange",onVisibility);
     const interval=window.setInterval(()=>{
-      if(document.visibilityState==="hidden"||Date.now()-lastActivity>90000){
+      if(document.visibilityState==="hidden"||Date.now()-lastActivity>300000){
         void closeSession();
         return;
       }
