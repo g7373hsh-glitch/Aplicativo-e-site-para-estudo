@@ -97,6 +97,20 @@ create table if not exists public.study_goals (
  target_date date, completed_at timestamptz, created_at timestamptz not null default now(), updated_at timestamptz not null default now()
 );
 
+-- Upgrade the original starter tables in-place when replaying the full migration history.
+alter table public.profiles add column if not exists avatar_url text;
+alter table public.profiles add column if not exists updated_at timestamptz not null default now();
+alter table public.study_tasks add column if not exists subject_id uuid references public.subjects(id) on delete set null;
+alter table public.study_tasks add column if not exists description text;
+alter table public.study_tasks add column if not exists priority text not null default 'medium';
+alter table public.study_tasks add column if not exists completed_at timestamptz;
+alter table public.study_tasks add column if not exists updated_at timestamptz not null default now();
+alter table public.study_materials add column if not exists subject_id uuid references public.subjects(id) on delete set null;
+alter table public.study_materials add column if not exists extracted_text text;
+alter table public.study_materials add column if not exists processing_error text;
+alter table public.study_materials add column if not exists updated_at timestamptz not null default now();
+alter table public.study_tasks drop constraint if exists study_tasks_priority_check;
+alter table public.study_tasks add constraint study_tasks_priority_check check(priority in ('low','medium','high'));
 create index if not exists study_tasks_user_due_idx on public.study_tasks(user_id,due_at);
 create index if not exists study_materials_user_created_idx on public.study_materials(user_id,created_at desc);
 create index if not exists study_chunks_material_idx on public.study_material_chunks(material_id,chunk_index);
