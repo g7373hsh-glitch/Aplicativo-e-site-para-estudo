@@ -29,13 +29,7 @@ Plataforma de estudos com IA, desenvolvida com React, TypeScript, Vite e Supabas
 Sem sessão autenticada, o site mostra dados de demonstração; os dados privados só são sincronizados após login.
 
 ## Configuração do backend de IA
-A Edge Function `study-assistant` está implantada no projeto Supabase e exige JWT válido. Configure a chave OpenAI como segredo do projeto, nunca no frontend:
-
-- Supabase Dashboard → Edge Functions → Secrets
-- Nome: `OPENAI_API_KEY`
-- Valor: sua chave OpenAI atual
-
-A função utiliza `gpt-4.1-mini` pela Responses API. Consulte [supabase/OPENAI_SETUP.md](supabase/OPENAI_SETUP.md).
+A Edge Function `study-assistant` está implantada no projeto Supabase e exige JWT válido. O responsável pelo projeto informou que já cadastrou `OPENAI_API_KEY` em Supabase → Edge Functions → Secrets. O valor do segredo não é legível pelas ferramentas conectadas e nunca é armazenado no repositório. A função utiliza `gpt-4.1-mini` pela Responses API. O teste ponta a ponta ainda depende de executar uma conversa autenticada na aplicação.
 
 ## Banco de dados
 A estrutura foi aplicada no projeto Supabase `bpjvbfjtbczpvkdpzrht`. Inclui perfis, matérias, tarefas, materiais, chunks vetoriais, sessões, conversas, mensagens, flashcards, simulados, tentativas, respostas e metas. Todas as tabelas têm RLS habilitado.
@@ -51,4 +45,4 @@ O GitHub Actions compila o frontend e tenta publicar no GitHub Pages. O Pages ho
 - A função de IA exige sessão autenticada e limita o tamanho da entrada.
 
 ## Estado atual
-A fundação do banco e a Edge Function já estão implantadas. O tutor só responderá quando `OPENAI_API_KEY` for cadastrada nos Secrets do Supabase. O fluxo de upload armazena os arquivos e registra seus metadados; extração de texto/OCR e indexação vetorial ainda precisam ser implementadas. A geração completa de simulados e flashcards e o aplicativo Tauri também permanecem em desenvolvimento.
+A fundação do banco e a Edge Function já estão implantadas. `OPENAI_API_KEY` foi informada como cadastrada nos Secrets; falta validar uma conversa autenticada de ponta a ponta. O fluxo de upload armazena os arquivos e registra seus metadados; extração de texto/OCR e indexação vetorial ainda precisam ser implementadas. A geração completa de simulados e flashcards e o aplicativo Tauri também permanecem em desenvolvimento.
